@@ -80,7 +80,7 @@ class Registrator {
   Timer? _registrationTimer;
   late bool _registering;
   bool _registered = false;
-  //late String _contact;
+  late String _contact;
   List<String>? _extraHeaders;
   late String _extraContactParams;
 
