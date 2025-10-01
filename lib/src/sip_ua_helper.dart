@@ -39,8 +39,9 @@ class SIPUAHelper extends EventManager {
   UaSettings? _uaSettings;
   final Map<String?, Call> _calls = <String?, Call>{};
 
-  RegistrationState _registerState =
-      RegistrationState(state: RegistrationStateEnum.NONE);
+  RegistrationState _registerState = RegistrationState(
+    state: RegistrationStateEnum.NONE,
+  );
 
   /// Sets the logging level for the default logger. Has no effect if custom logger is supplied.
   set loggingLevel(Level loggingLevel) => Log.loggingLevel = loggingLevel;
@@ -70,6 +71,8 @@ class SIPUAHelper extends EventManager {
 
   RegistrationState get registerState => _registerState;
 
+  UA? get ua => _ua;
+
   void stop() async {
     if (_ua != null) {
       _ua!.stop();
@@ -79,8 +82,10 @@ class SIPUAHelper extends EventManager {
   }
 
   void register() {
-    assert(_ua != null,
-        'register called but not started, you must call start first.');
+    assert(
+      _ua != null,
+      'register called but not started, you must call start first.',
+    );
     _ua!.register();
   }
 
@@ -94,11 +99,13 @@ class SIPUAHelper extends EventManager {
     }
   }
 
-  Future<bool> call(String target,
-      {bool voiceOnly = false,
-      MediaStream? mediaStream,
-      List<String>? headers,
-      Map<String, dynamic>? customOptions}) async {
+  Future<bool> call(
+    String target, {
+    bool voiceOnly = false,
+    MediaStream? mediaStream,
+    List<String>? headers,
+    Map<String, dynamic>? customOptions,
+  }) async {
     if (_ua != null && _ua!.isConnected()) {
       Map<String, dynamic> options = buildCallOptions(voiceOnly);
 
@@ -114,8 +121,10 @@ class SIPUAHelper extends EventManager {
       _ua!.call(target, options);
       return true;
     } else {
-      logger.e('Not connected, you will need to register.',
-          stackTrace: StackTraceNJ());
+      logger.e(
+        'Not connected, you will need to register.',
+        stackTrace: StackTraceNJ(),
+      );
     }
     return false;
   }
@@ -128,10 +137,16 @@ class SIPUAHelper extends EventManager {
     required Call call,
     required bool voiceOnly,
     Map<String, dynamic>? options,
+    bool? iceRestart,
     bool useUpdate = false,
     Function(IncomingMessage?)? done,
   }) async {
     Map<String, dynamic> finalOptions = options ?? buildCallOptions(voiceOnly);
+
+    if (iceRestart != null && iceRestart == true) {
+      finalOptions['rtcOfferConstraints']['mandatory']['IceRestart'] = true;
+    }
+
     call.renegotiate(options: finalOptions, useUpdate: useUpdate, done: done);
   }
 
@@ -150,16 +165,19 @@ class SIPUAHelper extends EventManager {
 
     if (uaSettings.transportType == TransportType.TCP) {
       SIPUATcpSocket socket = SIPUATcpSocket(
-          uaSettings.host ?? '0.0.0.0', uaSettings.port ?? '5060',
-          messageDelay: 1);
+        uaSettings.host ?? '0.0.0.0',
+        uaSettings.port ?? '5060',
+        messageDelay: 1,
+      );
       _settings.sockets!.add(socket);
     }
 
     if (uaSettings.transportType == TransportType.WS) {
       SIPUAWebSocket socket = SIPUAWebSocket(
-          uaSettings.webSocketUrl ?? 'wss://tryit.jssip.net:10443',
-          messageDelay: _settings.sip_message_delay,
-          webSocketSettings: uaSettings.webSocketSettings);
+        uaSettings.webSocketUrl ?? 'wss://tryit.jssip.net:10443',
+        messageDelay: _settings.sip_message_delay,
+        webSocketSettings: uaSettings.webSocketSettings,
+      );
       _settings.sockets!.add(socket);
     }
 
@@ -185,9 +203,10 @@ class SIPUAHelper extends EventManager {
         uaSettings.sessionTimersRefreshMethod;
     _settings.instance_id = uaSettings.instanceId;
     _settings.registrar_server = uaSettings.registrarServer;
-    _settings.contact_uri = uaSettings.contact_uri != null
-        ? Utils.normalizeTarget(uaSettings.contact_uri!)
-        : null;
+    _settings.contact_uri =
+        uaSettings.contact_uri != null
+            ? Utils.normalizeTarget(uaSettings.contact_uri!)
+            : null;
     _settings.connection_recovery_max_interval =
         uaSettings.connectionRecoveryMaxInterval;
     _settings.connection_recovery_min_interval =
@@ -200,41 +219,48 @@ class SIPUAHelper extends EventManager {
       _ua!.on(EventSocketConnecting(), (EventSocketConnecting event) {
         logger.d('connecting => $event');
         _notifyTransportStateListeners(
-            TransportState(TransportStateEnum.CONNECTING));
+          TransportState(TransportStateEnum.CONNECTING),
+        );
       });
 
       _ua!.on(EventSocketConnected(), (EventSocketConnected event) {
         logger.d('connected => $event');
         _notifyTransportStateListeners(
-            TransportState(TransportStateEnum.CONNECTED));
+          TransportState(TransportStateEnum.CONNECTED),
+        );
       });
 
       _ua!.on(EventSocketDisconnected(), (EventSocketDisconnected event) {
         logger.d('disconnected => ${event.cause}');
-        _notifyTransportStateListeners(TransportState(
-            TransportStateEnum.DISCONNECTED,
-            cause: event.cause));
+        _notifyTransportStateListeners(
+          TransportState(TransportStateEnum.DISCONNECTED, cause: event.cause),
+        );
       });
 
       _ua!.on(EventRegistered(), (EventRegistered event) {
         logger.d('registered => ${event.cause}');
         _registerState = RegistrationState(
-            state: RegistrationStateEnum.REGISTERED, cause: event.cause);
+          state: RegistrationStateEnum.REGISTERED,
+          cause: event.cause,
+        );
         _notifyRegistrationStateListeners(_registerState);
       });
 
       _ua!.on(EventUnregister(), (EventUnregister event) {
         logger.d('unregistered => ${event.cause}');
         _registerState = RegistrationState(
-            state: RegistrationStateEnum.UNREGISTERED, cause: event.cause);
+          state: RegistrationStateEnum.UNREGISTERED,
+          cause: event.cause,
+        );
         _notifyRegistrationStateListeners(_registerState);
       });
 
       _ua!.on(EventRegistrationFailed(), (EventRegistrationFailed event) {
         logger.d('registrationFailed => ${event.cause}');
         _registerState = RegistrationState(
-            state: RegistrationStateEnum.REGISTRATION_FAILED,
-            cause: event.cause);
+          state: RegistrationStateEnum.REGISTRATION_FAILED,
+          cause: event.cause,
+        );
         _notifyRegistrationStateListeners(_registerState);
       });
 
@@ -244,24 +270,35 @@ class SIPUAHelper extends EventManager {
         if (session.direction == Direction.incoming) {
           // Set event handlers.
           session.addAllEventHandlers(
-              buildCallOptions()['eventHandlers'] as EventManager);
+            buildCallOptions()['eventHandlers'] as EventManager,
+          );
         }
         bool hasVideo = session.data?['video'] ?? false;
 
-        _calls[event.id] =
-            Call(event.id, session, CallStateEnum.CALL_INITIATION, !hasVideo);
+        _calls[event.id] = Call(
+          event.id,
+          session,
+          CallStateEnum.CALL_INITIATION,
+          !hasVideo,
+        );
         _notifyCallStateListeners(
-            event,
-            CallState(CallStateEnum.CALL_INITIATION,
-                video: session.data?['video']));
+          event,
+          CallState(
+            CallStateEnum.CALL_INITIATION,
+            video: session.data?['video'],
+          ),
+        );
       });
 
       _ua!.on(EventNewMessage(), (EventNewMessage event) {
         logger.d('newMessage => $event');
         //Only notify incoming message to listener
         if (event.message!.direction == Direction.incoming) {
-          SIPMessageRequest message =
-              SIPMessageRequest(event.message, event.originator, event.request);
+          SIPMessageRequest message = SIPMessageRequest(
+            event.message,
+            event.originator,
+            event.request,
+          );
           _notifyNewMessageListeners(message);
         }
       });
@@ -288,24 +325,36 @@ class SIPUAHelper extends EventManager {
     handlers.on(EventCallProgress(), (EventCallProgress event) {
       logger.d('call is in progress');
       _notifyCallStateListeners(
-          event,
-          CallState(CallStateEnum.PROGRESS,
-              originator: event.originator, cause: event.cause));
+        event,
+        CallState(
+          CallStateEnum.PROGRESS,
+          originator: event.originator,
+          cause: event.cause,
+        ),
+      );
     });
     handlers.on(EventCallFailed(), (EventCallFailed event) {
       logger.d('call failed with cause: ${event.cause}');
       _notifyCallStateListeners(
-          event,
-          CallState(CallStateEnum.FAILED,
-              originator: event.originator, cause: event.cause));
+        event,
+        CallState(
+          CallStateEnum.FAILED,
+          originator: event.originator,
+          cause: event.cause,
+        ),
+      );
       _calls.remove(event.id);
     });
     handlers.on(EventCallEnded(), (EventCallEnded event) {
       logger.d('call ended with cause: ${event.cause}');
       _notifyCallStateListeners(
-          event,
-          CallState(CallStateEnum.ENDED,
-              originator: event.originator, cause: event.cause));
+        event,
+        CallState(
+          CallStateEnum.ENDED,
+          originator: event.originator,
+          cause: event.cause,
+        ),
+      );
       _calls.remove(event.id);
     });
     handlers.on(EventCallAccepted(), (EventCallAccepted event) {
@@ -319,34 +368,46 @@ class SIPUAHelper extends EventManager {
     handlers.on(EventCallHold(), (EventCallHold event) {
       logger.d('call hold');
       _notifyCallStateListeners(
-          event, CallState(CallStateEnum.HOLD, originator: event.originator));
+        event,
+        CallState(CallStateEnum.HOLD, originator: event.originator),
+      );
     });
     handlers.on(EventCallUnhold(), (EventCallUnhold event) {
       logger.d('call unhold');
       _notifyCallStateListeners(
-          event, CallState(CallStateEnum.UNHOLD, originator: event.originator));
+        event,
+        CallState(CallStateEnum.UNHOLD, originator: event.originator),
+      );
     });
     handlers.on(EventCallMuted(), (EventCallMuted event) {
       logger.d('call muted');
       _notifyCallStateListeners(
-          event,
-          CallState(CallStateEnum.MUTED,
-              audio: event.audio, video: event.video));
+        event,
+        CallState(CallStateEnum.MUTED, audio: event.audio, video: event.video),
+      );
     });
     handlers.on(EventCallUnmuted(), (EventCallUnmuted event) {
       logger.d('call unmuted');
       _notifyCallStateListeners(
-          event,
-          CallState(CallStateEnum.UNMUTED,
-              audio: event.audio, video: event.video));
+        event,
+        CallState(
+          CallStateEnum.UNMUTED,
+          audio: event.audio,
+          video: event.video,
+        ),
+      );
     });
     handlers.on(EventStream(), (EventStream event) async {
       // Waiting for callscreen ready.
       Timer(Duration(milliseconds: 100), () {
         _notifyCallStateListeners(
-            event,
-            CallState(CallStateEnum.STREAM,
-                stream: event.stream, originator: event.originator));
+          event,
+          CallState(
+            CallStateEnum.STREAM,
+            stream: event.stream,
+            originator: event.originator,
+          ),
+        );
       });
     });
 
@@ -357,7 +418,9 @@ class SIPUAHelper extends EventManager {
     handlers.on(EventCallRefer(), (EventCallRefer refer) async {
       logger.d('Refer received, Transfer current call to => ${refer.aor}');
       _notifyCallStateListeners(
-          refer, CallState(CallStateEnum.REFER, refer: refer));
+        refer,
+        CallState(CallStateEnum.REFER, refer: refer),
+      );
       //Always accept.
       refer.accept((RTCSession session) {
         logger.d('session initialized.');
@@ -372,21 +435,26 @@ class SIPUAHelper extends EventManager {
         'iceTransportPolicy':
             (_uaSettings?.iceTransportPolicy ?? IceTransportPolicy.ALL)
                 .toParameterString(),
-        'iceServers': _uaSettings?.iceServers
+        'iceServers': _uaSettings?.iceServers,
+        'tcpCandidatePolicy':
+            (_uaSettings?.tcpCandidatePolicy ?? TcpCandidatePolicy.DISABLED)
+                .toParameterString(),
+        'iceCandidatePoolSize': _uaSettings?.iceCandidatePoolSize,
       },
       'mediaConstraints': <String, dynamic>{
         'audio': true,
-        'video': voiceonly
-            ? false
-            : <String, dynamic>{
-                'mandatory': <String, dynamic>{
-                  'minWidth': '640',
-                  'minHeight': '480',
-                  'minFrameRate': '30',
+        'video':
+            voiceonly
+                ? false
+                : <String, dynamic>{
+                  'mandatory': <String, dynamic>{
+                    'minWidth': '640',
+                    'minHeight': '480',
+                    'minFrameRate': '30',
+                  },
+                  'facingMode': 'user',
+                  'optional': <dynamic>[],
                 },
-                'facingMode': 'user',
-                'optional': <dynamic>[],
-              }
       },
       'rtcOfferConstraints': <String, dynamic>{
         'mandatory': <String, dynamic>{
@@ -408,7 +476,7 @@ class SIPUAHelper extends EventManager {
           <String, dynamic>{'DtlsSrtpKeyAgreement': true},
         ],
       },
-      'sessionTimersExpires': 120
+      'sessionTimersExpires': 120,
     };
     return defaultOptions;
   }
@@ -417,13 +485,20 @@ class SIPUAHelper extends EventManager {
     return _ua!.set(parameter, value);
   }
 
-  Message sendMessage(String target, String body,
-      [Map<String, dynamic>? options, Map<String, dynamic>? params]) {
+  Message sendMessage(
+    String target,
+    String body, [
+    Map<String, dynamic>? options,
+    Map<String, dynamic>? params,
+  ]) {
     return _ua!.sendMessage(target, body, options, params);
   }
 
   Options sendOptions(
-      String target, String body, Map<String, dynamic>? params) {
+    String target,
+    String body,
+    Map<String, dynamic>? params,
+  ) {
     return _ua!.sendOptions(target, body, params);
   }
 
@@ -499,12 +574,15 @@ class SIPUAHelper extends EventManager {
       if (request.sdp == null && body.isNotEmpty) {
         request.sdp = sdp_transform.parse(body);
       }
-      listener.onNewReinvite(ReInvite(
+      listener.onNewReinvite(
+        ReInvite(
           sdp: request.sdp,
           hasAudio: event.hasAudio,
           hasVideo: event.hasVideo,
           accept: event.callback,
-          reject: event.reject));
+          reject: event.reject,
+        ),
+      );
     }
   }
 
@@ -570,7 +648,8 @@ class Call {
       for (MediaStream? stream in peerConnection!.getLocalStreams()) {
         if (stream == null) return;
         logger.d(
-            'Stopping local stream with tracks: ${stream.getTracks().length}');
+          'Stopping local stream with tracks: ${stream.getTracks().length}',
+        );
         for (MediaStreamTrack track in stream.getTracks()) {
           logger.d('Stopping track: ${track.kind}${track.id} ');
           track.stop();
@@ -579,7 +658,8 @@ class Call {
       for (MediaStream? stream in peerConnection!.getRemoteStreams()) {
         if (stream == null) return;
         logger.d(
-            'Stopping remote stream with tracks: ${stream.getTracks().length}');
+          'Stopping remote stream with tracks: ${stream.getTracks().length}',
+        );
         for (MediaStreamTrack track in stream.getTracks()) {
           logger.d('Stopping track: ${track.kind}${track.id} ');
           track.stop();
@@ -637,13 +717,17 @@ class Call {
 
     options?.putIfAbsent('body', () => body);
 
-    _session.sendRequest(DartSIP_C.SipMethod.MESSAGE,
-        options ?? <String, dynamic>{'body': body});
+    _session.sendRequest(
+      DartSIP_C.SipMethod.MESSAGE,
+      options ?? <String, dynamic>{'body': body},
+    );
   }
 
   String? get remote_display_name {
-    assert(_session != null,
-        'ERROR(get remote_identity): rtc session is invalid!');
+    assert(
+      _session != null,
+      'ERROR(get remote_identity): rtc session is invalid!',
+    );
     if (_session.remote_identity != null &&
         _session.remote_identity!.display_name != null) {
       return _session.remote_identity!.display_name;
@@ -652,8 +736,10 @@ class Call {
   }
 
   String? get remote_identity {
-    assert(_session != null,
-        'ERROR(get remote_identity): rtc session is invalid!');
+    assert(
+      _session != null,
+      'ERROR(get remote_identity): rtc session is invalid!',
+    );
     if (_session.remote_identity != null &&
         _session.remote_identity!.uri != null &&
         _session.remote_identity!.uri!.user != null) {
@@ -664,7 +750,9 @@ class Call {
 
   String? get local_identity {
     assert(
-        _session != null, 'ERROR(get local_identity): rtc session is invalid!');
+      _session != null,
+      'ERROR(get local_identity): rtc session is invalid!',
+    );
     if (_session.local_identity != null &&
         _session.local_identity!.uri != null &&
         _session.local_identity!.uri!.user != null) {
@@ -684,7 +772,9 @@ class Call {
 
   bool _peerHasMediaLine(String media) {
     assert(
-        _session != null, 'ERROR(_peerHasMediaLine): rtc session is invalid!');
+      _session != null,
+      'ERROR(_peerHasMediaLine): rtc session is invalid!',
+    );
     if (_session.request == null) {
       return false;
     }
@@ -713,13 +803,15 @@ class Call {
 }
 
 class CallState {
-  CallState(this.state,
-      {this.originator,
-      this.audio,
-      this.video,
-      this.stream,
-      this.cause,
-      this.refer});
+  CallState(
+    this.state, {
+    this.originator,
+    this.audio,
+    this.video,
+    this.stream,
+    this.cause,
+    this.refer,
+  });
   CallStateEnum state;
   ErrorCause? cause;
   Originator? originator;
@@ -742,12 +834,7 @@ class RegistrationState {
   ErrorCause? cause;
 }
 
-enum TransportStateEnum {
-  NONE,
-  CONNECTING,
-  CONNECTED,
-  DISCONNECTED,
-}
+enum TransportStateEnum { NONE, CONNECTING, CONNECTED, DISCONNECTED }
 
 class TransportState {
   TransportState(this.state, {this.cause});
@@ -823,10 +910,7 @@ class TcpSocketSettings {
   bool allowBadCertificate = false;
 }
 
-enum DtmfMode {
-  INFO,
-  RFC2833,
-}
+enum DtmfMode { INFO, RFC2833 }
 
 /// Possible values for the transport policy to be used when selecting ICE
 /// candidates.
@@ -849,6 +933,19 @@ extension _IceTransportPolicyEncoding on IceTransportPolicy {
         return 'all';
       case IceTransportPolicy.RELAY:
         return 'relay';
+    }
+  }
+}
+
+enum TcpCandidatePolicy { ENABLED, DISABLED }
+
+extension _TcpCandidatePolicyEncoding on TcpCandidatePolicy {
+  String toParameterString() {
+    switch (this) {
+      case TcpCandidatePolicy.ENABLED:
+        return 'enabled';
+      case TcpCandidatePolicy.DISABLED:
+        return 'disabled';
     }
   }
 }
@@ -905,18 +1002,30 @@ class UaSettings {
   int sip_message_delay = 0;
   List<Map<String, String>> iceServers = <Map<String, String>>[
     <String, String>{'urls': 'stun:stun.l.google.com:19302'},
-// turn server configuration example.
-//    {
-//      'url': 'turn:123.45.67.89:3478',
-//      'username': 'change_to_real_user',
-//      'credential': 'change_to_real_secret'
-//    },
+    // turn server configuration example.
+    //    {
+    //      'url': 'turn:123.45.67.89:3478',
+    //      'username': 'change_to_real_user',
+    //      'credential': 'change_to_real_secret'
+    //    },
   ];
 
   /// Defines the transport policy to be used for ICE.
   /// See [IceTransportPolicy] for possible values.
   /// Will default to [IceTransportPolicy.ALL] if not specified.
   IceTransportPolicy? iceTransportPolicy;
+
+  /// Allows to disable tcp candidates gathering
+  /// Will default to [TcpCandidatePolicy.ENABLED] if not specified.
+  TcpCandidatePolicy? tcpCandidatePolicy;
+
+  /// An unsigned 16-bit integer value which specifies the size of the prefetched
+  /// ICE candidate pool. The default value is 0 (meaning no candidate prefetching will occur).
+  /// You may find in some cases that connections can be established more quickly
+  /// by allowing the ICE agent to start fetching ICE candidates before you start
+  /// trying to connect, so that they're already available for inspection
+  /// when RTCPeerConnection.setLocalDescription() is called.
+  int iceCandidatePoolSize = 0;
 
   /// Controls which kind of messages are to be sent to keep a SIP session
   /// alive.

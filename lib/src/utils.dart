@@ -10,6 +10,9 @@ import 'constants.dart' as DartSIP_C;
 import 'grammar.dart';
 import 'uri.dart';
 
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:sdp_transform/sdp_transform.dart' as sdp_transform;
+
 final JsonDecoder decoder = JsonDecoder();
 final JsonEncoder encoder = JsonEncoder();
 final DartMath.Random _random = DartMath.Random();
@@ -122,7 +125,9 @@ URI? normalizeTarget(dynamic target, [String? domain]) {
 
     // Remove the URI scheme (if present).
     targetUser = targetUser.replaceAll(
-        RegExp(r'^(sips?|tel):', caseSensitive: false), '');
+      RegExp(r'^(sips?|tel):', caseSensitive: false),
+      '',
+    );
 
     // Remove 'tel' visual separators if the user portion just contains 'tel' number symbols.
     if (targetUser.contains(RegExp(r'^[-.()]*\+?[0-9\-.()]+$'))) {
@@ -143,7 +148,7 @@ String headerize(String str) {
   Map<String, String> exceptions = <String, String>{
     'Call-Id': 'Call-ID',
     'Cseq': 'CSeq',
-    'Www-Authenticate': 'WWW-Authenticate'
+    'Www-Authenticate': 'WWW-Authenticate',
   };
 
   List<String> names = str.toLowerCase().replaceAll('_', '-').split('-');
@@ -157,7 +162,7 @@ String headerize(String str) {
     }
     hname +=
         String.fromCharCodes(<int>[names[part].codeUnitAt(0)]).toUpperCase() +
-            names[part].substring(1);
+        names[part].substring(1);
   }
   if (exceptions[hname] != null) {
     hname = exceptions[hname]!;
@@ -182,4 +187,153 @@ String calculateMD5(String string) {
 
 List<dynamic> cloneArray(List<dynamic>? array) {
   return (array != null) ? array.sublist(0) : <dynamic>[];
+}
+
+String _filterSdpKeepPayloads(
+  String? sdp,
+  String media,
+  Set<String> allowedPayloads, {
+  bool keepAssociatedRtx = true,
+  bool removeMediaIfEmpty = false,
+}) {
+  if (sdp == null || sdp.isEmpty) return sdp ?? '';
+
+  final lines = sdp.split(RegExp(r'\r\n|\r|\n'));
+  final out = <String>[];
+  int i = 0;
+
+  while (i < lines.length) {
+    final line = lines[i];
+
+    // Detecta início de seção "m=audio" ou "m=video"
+    final mMatch = RegExp(r'^m=(\w+)\s').firstMatch(line);
+    if (mMatch != null && mMatch.group(1) == media) {
+      // coleta todas as linhas desta seção até o próximo "m=" ou EOF
+      final section = <String>[];
+      section.add(line);
+      i++;
+      while (i < lines.length && !lines[i].startsWith('m=')) {
+        section.add(lines[i]);
+        i++;
+      }
+
+      // Parse da linha m= para obter payloads na ordem original
+      final parts = section[0].split(RegExp(r'\s+'));
+      final originalPayloads =
+          parts.length > 3
+              ? parts.sublist(3).where((p) => p.trim().isNotEmpty).toList()
+              : <String>[];
+
+      // keptOrdered = interseção na ordem original
+      final keptOrdered =
+          originalPayloads.where((p) => allowedPayloads.contains(p)).toList();
+
+      // Coleta linhas por payload dentro da seção e mapeia apt (fmtp apt=)
+      final Map<String, List<String>> payloadLines = {};
+      final Map<String, String> aptMap = {};
+
+      for (var j = 1; j < section.length; j++) {
+        final s = section[j];
+        final payloadMatch = RegExp(
+          r'^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)\b',
+        ).firstMatch(s);
+        if (payloadMatch != null) {
+          final pt = payloadMatch.group(1)!;
+          payloadLines.putIfAbsent(pt, () => []).add(s);
+
+          if (s.startsWith('a=fmtp:')) {
+            final aptMatch = RegExp(r'\bapt=(\d+)\b').firstMatch(s);
+            if (aptMatch != null) aptMap[pt] = aptMatch.group(1)!;
+          }
+        }
+      }
+
+      // Expande para incluir payloads associados (RTX) se pedido
+      final finalKeep = Set<String>.from(keptOrdered);
+      if (keepAssociatedRtx) {
+        bool added;
+        do {
+          added = false;
+          aptMap.forEach((pt, apt) {
+            if (finalKeep.contains(apt) && !finalKeep.contains(pt)) {
+              finalKeep.add(pt);
+              added = true;
+            }
+          });
+        } while (added);
+      }
+
+      if (finalKeep.isEmpty) {
+        if (removeMediaIfEmpty) {
+          // pula a seção inteira
+          continue;
+        } else {
+          // para segurança, se nenhum payload permitido existia, mantemos a seção original
+          out.addAll(section);
+          continue;
+        }
+      }
+
+      // Recria a linha m= mantendo apenas os payloads finais na ordem original
+      final newPayloadOrder =
+          originalPayloads.where((p) => finalKeep.contains(p)).toList();
+      final newMLine =
+          '${parts.sublist(0, 3).join(' ')} ${newPayloadOrder.join(' ')}';
+      out.add(newMLine);
+
+      // Agora adiciona as linhas da seção: mantém linhas sem payload explícito
+      // e mantém apenas as linhas de payload que estão em finalKeep
+      for (var j = 1; j < section.length; j++) {
+        final s = section[j];
+        final payloadMatch = RegExp(
+          r'^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)\b',
+        ).firstMatch(s);
+        if (payloadMatch != null) {
+          final pt = payloadMatch.group(1)!;
+          if (finalKeep.contains(pt)) {
+            out.add(s);
+          } else {
+            // ignora linha relacionada a payload não mantido
+          }
+        } else {
+          out.add(s); // mantém linhas sem id de payload
+        }
+      }
+    } else {
+      // linha fora da seção alvo: mantém
+      out.add(line);
+      i++;
+    }
+  }
+  return out.join('\r\n');
+}
+
+/// Mantém apenas os payloads de áudio 0, 8, 101 e 126 (e RTX associados se existirem).
+String removeUnwantedAudioCodecs(
+  String? sdp, {
+  bool keepAssociatedRtx = true,
+  bool removeMediaIfEmpty = false,
+}) {
+  return _filterSdpKeepPayloads(
+    sdp,
+    'audio',
+    <String>{'0', '8', '101', '126'},
+    keepAssociatedRtx: keepAssociatedRtx,
+    removeMediaIfEmpty: removeMediaIfEmpty,
+  );
+}
+
+/// Mantém apenas o payload de vídeo 98 (e RTX associado se existirem).
+String removeUnwantedVideoCodecs(
+  String? sdp, {
+  bool keepAssociatedRtx = true,
+  bool removeMediaIfEmpty = false,
+}) {
+  return _filterSdpKeepPayloads(
+    sdp,
+    'video',
+    <String>{'98'},
+    keepAssociatedRtx: keepAssociatedRtx,
+    removeMediaIfEmpty: removeMediaIfEmpty,
+  );
 }
