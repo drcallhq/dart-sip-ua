@@ -593,6 +593,16 @@ class SIPUAHelper extends EventManager {
       listener.onNewNotify(Notify(request: event.request));
     }
   }
+
+  /// Disable auto-register on reconnect without sending UNREGISTER.
+  void disableAutoRegister() {
+    _ua?.disableAutoRegister();
+  }
+
+  /// Enable auto-register on reconnect.
+  void enableAutoRegister() {
+    _ua?.enableAutoRegister();
+  }
 }
 
 enum CallStateEnum {

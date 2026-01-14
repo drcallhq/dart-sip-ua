@@ -95,7 +95,7 @@ class UA extends EventManager {
 
   final Map<String?, Subscriber> _subscribers = <String?, Subscriber>{};
   final Map<String, dynamic> _cache = <String, dynamic>{
-    'credentials': <dynamic>{}
+    'credentials': <dynamic>{},
   };
 
   final Settings _configuration = Settings();
@@ -113,7 +113,7 @@ class UA extends EventManager {
   UAError? _error;
   late TransactionBag _transactions;
 
-// Custom UA empty object for high level use.
+  // Custom UA empty object for high level use.
   final Map<String, dynamic> _data = <String, dynamic>{};
 
   Timer? _closeTimer;
@@ -164,7 +164,8 @@ class UA extends EventManager {
       logger.d('UA is in READY status, not restarted');
     } else {
       logger.d(
-          'ERROR: connection is down, Auto-Recovery system is trying to reconnect');
+        'ERROR: connection is down, Auto-Recovery system is trying to reconnect',
+      );
     }
 
     // Set dynamic configuration.
@@ -205,8 +206,17 @@ class UA extends EventManager {
   ]) {
     logger.d('subscribe()');
 
-    return Subscriber(this, target, eventName, accept, expires, contentType,
-        allowEvents, requestParams, extraHeaders);
+    return Subscriber(
+      this,
+      target,
+      eventName,
+      accept,
+      expires,
+      contentType,
+      allowEvents,
+      requestParams,
+      extraHeaders,
+    );
   }
 
   /**
@@ -256,8 +266,12 @@ class UA extends EventManager {
    * -throws {TypeError}
    *
    */
-  Message sendMessage(String target, String body, Map<String, dynamic>? options,
-      Map<String, dynamic>? params) {
+  Message sendMessage(
+    String target,
+    String body,
+    Map<String, dynamic>? options,
+    Map<String, dynamic>? params,
+  ) {
     logger.d('sendMessage()');
     Message message = Message(this);
     message.send(target, body, options, params);
@@ -275,7 +289,10 @@ class UA extends EventManager {
    *
    */
   Options sendOptions(
-      String target, String body, Map<String, dynamic>? options) {
+    String target,
+    String body,
+    Map<String, dynamic>? options,
+  ) {
     logger.d('sendOptions()');
     Options message = Options(this);
     message.send(target, body, options);
@@ -497,8 +514,13 @@ class UA extends EventManager {
       return;
     }
     _applicants.add(message);
-    emit(EventNewMessage(
-        message: message, originator: originator, request: request));
+    emit(
+      EventNewMessage(
+        message: message,
+        originator: originator,
+        request: request,
+      ),
+    );
   }
 
   /**
@@ -510,8 +532,13 @@ class UA extends EventManager {
     }
     _applicants.add(message);
 
-    emit(EventNewOptions(
-        message: message, originator: originator, request: request));
+    emit(
+      EventNewOptions(
+        message: message,
+        originator: originator,
+        request: request,
+      ),
+    );
   }
 
   /**
@@ -537,11 +564,19 @@ class UA extends EventManager {
   /**
    * RTCSession
    */
-  void newRTCSession(
-      {required RTCSession session, Originator? originator, dynamic request}) {
+  void newRTCSession({
+    required RTCSession session,
+    Originator? originator,
+    dynamic request,
+  }) {
     _sessions[session.id] = session;
-    emit(EventNewRTCSession(
-        session: session, originator: originator, request: request));
+    emit(
+      EventNewRTCSession(
+        session: session,
+        originator: originator,
+        request: request,
+      ),
+    );
   }
 
   /**
@@ -555,33 +590,45 @@ class UA extends EventManager {
    * Registered
    */
   void registered({required dynamic response}) {
-    emit(EventRegistered(
+    emit(
+      EventRegistered(
         cause: ErrorCause(
-            cause: 'registered',
-            status_code: response.status_code,
-            reason_phrase: response.reason_phrase)));
+          cause: 'registered',
+          status_code: response.status_code,
+          reason_phrase: response.reason_phrase,
+        ),
+      ),
+    );
   }
 
   /**
    * Unregistered
    */
   void unregistered({dynamic response, String? cause}) {
-    emit(EventUnregister(
+    emit(
+      EventUnregister(
         cause: ErrorCause(
-            cause: cause ?? 'unregistered',
-            status_code: response?.status_code ?? 0,
-            reason_phrase: response?.reason_phrase ?? '')));
+          cause: cause ?? 'unregistered',
+          status_code: response?.status_code ?? 0,
+          reason_phrase: response?.reason_phrase ?? '',
+        ),
+      ),
+    );
   }
 
   /**
    * Registration Failed
    */
   void registrationFailed({required dynamic response, String? cause}) {
-    emit(EventRegistrationFailed(
+    emit(
+      EventRegistrationFailed(
         cause: ErrorCause(
-            cause: Utils.sipErrorCause(response.status_code),
-            status_code: response.status_code,
-            reason_phrase: response.reason_phrase)));
+          cause: Utils.sipErrorCause(response.status_code),
+          status_code: response.status_code,
+          reason_phrase: response.reason_phrase,
+        ),
+      ),
+    );
   }
 
   // =================
@@ -677,7 +724,10 @@ class UA extends EventManager {
               ParsedData replaces = request.replaces;
 
               dialog = _findDialog(
-                  replaces.call_id, replaces.from_tag!, replaces.to_tag!);
+                replaces.call_id,
+                replaces.from_tag!,
+                replaces.to_tag!,
+              );
               if (dialog != null) {
                 session = dialog.owner as RTCSession?;
                 if (!session!.isEnded()) {
@@ -702,8 +752,11 @@ class UA extends EventManager {
           request.reply(481);
           break;
         case SipMethod.CANCEL:
-          session =
-              _findSession(request.call_id!, request.from_tag, request.to_tag);
+          session = _findSession(
+            request.call_id!,
+            request.from_tag,
+            request.to_tag,
+          );
           if (session != null) {
             session.receiveRequest(request);
           } else {
@@ -731,14 +784,20 @@ class UA extends EventManager {
     }
     // In-dialog request.
     else {
-      dialog =
-          _findDialog(request.call_id!, request.from_tag!, request.to_tag!);
+      dialog = _findDialog(
+        request.call_id!,
+        request.from_tag!,
+        request.to_tag!,
+      );
 
       if (dialog != null) {
         dialog.receiveRequest(request);
       } else if (method == SipMethod.NOTIFY) {
         Subscriber? sub = _findSubscriber(
-            request.call_id!, request.from_tag!, request.to_tag!);
+          request.call_id!,
+          request.from_tag!,
+          request.to_tag!,
+        );
         if (sub != null) {
           sub.receiveRequest(request);
         } else {
@@ -746,7 +805,6 @@ class UA extends EventManager {
           request.reply(481, 'Subscription does not exist');
         }
       }
-
       /* RFC3261 12.2.2
        * Request with to tag, but no matching dialog found.
        * Exception: ACK for an Invite request for which a dialog has not
@@ -836,9 +894,10 @@ class UA extends EventManager {
         configuration.terminateOnAudioMediaPortZero;
 
     hostport_params.user = null;
-    _configuration.hostport_params = hostport_params
-        .toString()
-        .replaceAll(RegExp(r'sip:', caseSensitive: false), '');
+    _configuration.hostport_params = hostport_params.toString().replaceAll(
+      RegExp(r'sip:', caseSensitive: false),
+      '',
+    );
 
     // Websockets Transport
 
@@ -846,7 +905,7 @@ class UA extends EventManager {
       _socketTransport = SocketTransport(_configuration.sockets!, <String, int>{
         // Recovery options.
         'max_interval': _configuration.connection_recovery_max_interval,
-        'min_interval': _configuration.connection_recovery_min_interval
+        'min_interval': _configuration.connection_recovery_min_interval,
       });
 
       // Transport event callbacks.
@@ -895,11 +954,12 @@ class UA extends EventManager {
     // Contact URI.
     else {
       _configuration.contact_uri = URI(
-          'sip',
-          Utils.createRandomToken(8),
-          _configuration.via_host,
-          null,
-          <dynamic, dynamic>{'transport': transport});
+        'sip',
+        Utils.createRandomToken(8),
+        _configuration.via_host,
+        null,
+        <dynamic, dynamic>{'transport': transport},
+      );
     }
     _contact = Contact(_configuration.contact_uri);
     return;
@@ -909,13 +969,13 @@ class UA extends EventManager {
    * Transport event handlers
    */
 
-// Transport connecting event.
+  // Transport connecting event.
   void onTransportConnecting(SIPUASocketInterface? socket, int? attempts) {
     logger.d('Transport connecting');
     emit(EventSocketConnecting(socket: socket));
   }
 
-// Transport connected event.
+  // Transport connected event.
   void onTransportConnect(SocketTransport transport) {
     logger.d('Transport connected');
     if (_status == UAStatus.userClosed) {
@@ -931,7 +991,7 @@ class UA extends EventManager {
     }
   }
 
-// Transport disconnected event.
+  // Transport disconnected event.
   void onTransportDisconnect(SIPUASocketInterface? socket, ErrorCause cause) {
     // Run _onTransportError_ callback on every client transaction using _transport_.
     _transactions.removeAll().forEach((TransactionBase transaction) {
@@ -949,7 +1009,7 @@ class UA extends EventManager {
     }
   }
 
-// Transport data event.
+  // Transport data event.
   void onTransportData(SocketTransport transport, String messageData) {
     IncomingMessage? message = Parser.parseMessage(messageData, this);
 
@@ -964,7 +1024,8 @@ class UA extends EventManager {
     // Do some sanity check.
     if (!sanityCheck(message, this, transport)) {
       logger.w(
-          'Incoming message did not pass sanity test, dumping it: \n\n $message');
+        'Incoming message did not pass sanity test, dumping it: \n\n $message',
+      );
       return;
     }
 
@@ -980,7 +1041,9 @@ class UA extends EventManager {
       switch (message.method) {
         case SipMethod.INVITE:
           InviteClientTransaction? transaction = _transactions.getTransaction(
-              InviteClientTransaction, message.via_branch!);
+            InviteClientTransaction,
+            message.via_branch!,
+          );
           if (transaction != null) {
             transaction.receiveResponse(message.status_code, message);
           }
@@ -996,6 +1059,22 @@ class UA extends EventManager {
           }
           break;
       }
+    }
+  }
+
+  /// Disable auto-register on reconnect without sending UNREGISTER to server.
+  /// This keeps the registration on the server but prevents the client from
+  /// auto-registering when the transport reconnects.
+  void disableAutoRegister() {
+    if (_dynConfiguration != null) {
+      _dynConfiguration!.register = false;
+    }
+  }
+
+  /// Enable auto-register on reconnect.
+  void enableAutoRegister() {
+    if (_dynConfiguration != null) {
+      _dynConfiguration!.register = true;
     }
   }
 }
