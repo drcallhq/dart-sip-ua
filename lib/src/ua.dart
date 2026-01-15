@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'config.dart' as config;
 import 'config.dart';
@@ -177,7 +178,9 @@ class UA extends EventManager {
    */
   void register() {
     logger.d('register()');
-    _dynConfiguration!.register = true;
+    if (!Platform.isIOS && !Platform.isAndroid) {
+      _dynConfiguration!.register = true;
+    }
     _registrator.register();
   }
 
@@ -987,7 +990,9 @@ class UA extends EventManager {
     emit(EventSocketConnected(socket: transport.socket));
 
     if (_dynConfiguration!.register!) {
-      _registrator.register();
+      if (!Platform.isIOS && !Platform.isAndroid) {
+        _registrator.register();
+      }
     }
   }
 
