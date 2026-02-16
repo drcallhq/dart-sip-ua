@@ -130,6 +130,7 @@ class RTCSession extends EventManager implements Owner {
 
   Timer? _iceDisconnectTimer;
   bool _isAttemptingIceRestart = false;
+  RTCIceConnectionState? _lastIceState;
 
   // SIP Timers.
   final SIPTimers _timers = SIPTimers();
@@ -1807,6 +1808,9 @@ class RTCSession extends EventManager implements Owner {
       } else if (state ==
           RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
         logger.w('ICE Connection State Disconnected.');
+
+        emit(EventCallIceDisconnected(session: this));
+
         if (_iceDisconnectTimer == null && !_isAttemptingIceRestart) {
           logger.i('Starting ICE disconnect timer...');
           _iceDisconnectTimer = Timer(const Duration(seconds: 20), () {
@@ -1832,21 +1836,30 @@ class RTCSession extends EventManager implements Owner {
       } else if (state ==
               RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
-        // If connection recovers, cancel timer and reset flag
+        final bool wasDisconnected =
+            _lastIceState ==
+                RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+            _lastIceState ==
+                RTCIceConnectionState.RTCIceConnectionStateFailed;
+
         if (_iceDisconnectTimer != null || _isAttemptingIceRestart) {
           logger.i(
             'ICE Connection State Connected/Completed. Canceling timer/resetting flag.',
           );
           _iceDisconnectTimer?.cancel();
+          _iceDisconnectTimer = null;
           _isAttemptingIceRestart = false;
         } else {
           logger.i('ICE Connection State Connected/Completed.');
         }
+
+        if (wasDisconnected) {
+          logger.i('ICE fully recovered after disconnection → emitting EventCallIceRecovered.');
+          emit(EventCallIceRecovered(session: this));
+        }
       } else if (state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
-        // Connection closed locally, usually via _connection.close() called by terminate()
-        logger.i('ICE Connection State Closed.'); // Use logger.i
-        _iceDisconnectTimer?.cancel(); // Ensure timer is cancelled
-        // Ensure *SIP* session state reflects closure if not already set by terminate()
+        logger.i('ICE Connection State Closed.');
+        _iceDisconnectTimer?.cancel();
         if (_state != RtcSessionState.terminated &&
             _state != RtcSessionState.canceled) {
           logger.w(
@@ -1859,10 +1872,12 @@ class RTCSession extends EventManager implements Owner {
           });
         }
       } else if (state == RTCIceConnectionState.RTCIceConnectionStateChecking) {
-        logger.d('ICE Connection State Checking...'); // Use logger.d
+        logger.d('ICE Connection State Checking...');
       } else if (state == RTCIceConnectionState.RTCIceConnectionStateNew) {
-        logger.d('ICE Connection State New.'); // Use logger.d
+        logger.d('ICE Connection State New.');
       }
+
+      _lastIceState = state;
     };
     // In future versions, unified-plan will be used by default
     String? sdpSemantics = 'unified-plan';

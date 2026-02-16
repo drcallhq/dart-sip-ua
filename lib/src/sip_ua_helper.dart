@@ -426,6 +426,21 @@ class SIPUAHelper extends EventManager {
         logger.d('session initialized.');
       }, buildCallOptions(true));
     });
+    handlers.on(EventCallIceDisconnected(),
+        (EventCallIceDisconnected event) {
+      logger.d('ICE disconnected');
+      _notifyCallStateListeners(
+        event,
+        CallState(CallStateEnum.ICE_DISCONNECTED),
+      );
+    });
+    handlers.on(EventCallIceRecovered(), (EventCallIceRecovered event) {
+      logger.d('ICE recovered after disconnection');
+      _notifyCallStateListeners(
+        event,
+        CallState(CallStateEnum.ICE_RECOVERED),
+      );
+    });
 
     Map<String, dynamic> defaultOptions = <String, dynamic>{
       'eventHandlers': handlers,
@@ -620,6 +635,8 @@ enum CallStateEnum {
   HOLD,
   UNHOLD,
   CALL_INITIATION,
+  ICE_DISCONNECTED,
+  ICE_RECOVERED,
 }
 
 class Call {

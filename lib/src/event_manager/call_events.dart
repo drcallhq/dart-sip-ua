@@ -116,3 +116,11 @@ class EventCallRefer extends CallEvent {
   //bool Function([dynamic options]) reject;
   dynamic reject;
 }
+
+class EventCallIceDisconnected extends CallEvent {
+  EventCallIceDisconnected({RTCSession? session}) : super(session);
+}
+
+class EventCallIceRecovered extends CallEvent {
+  EventCallIceRecovered({RTCSession? session}) : super(session);
+}
