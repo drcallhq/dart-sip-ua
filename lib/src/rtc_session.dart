@@ -129,7 +129,9 @@ class RTCSession extends EventManager implements Owner {
   bool _rtcReady = true;
 
   Timer? _iceDisconnectTimer;
+  Timer? _iceFailedRestartTimer;
   bool _isAttemptingIceRestart = false;
+  bool _hasAttemptedIceRestartOnFailed = false;
   RTCIceConnectionState? _lastIceState;
 
   // SIP Timers.
@@ -181,13 +183,12 @@ class RTCSession extends EventManager implements Owner {
   @override
   int get TerminatedCode => RtcSessionState.terminated.index;
 
-  RTCDTMFSender? get dtmfSender =>
-      _senders
-          .firstWhereOrNull(
-            (RTCRtpSender item) =>
-                item.track != null && item.track!.kind == 'audio',
-          )
-          ?.dtmfSender;
+  RTCDTMFSender? get dtmfSender => _senders
+      .firstWhereOrNull(
+        (RTCRtpSender item) =>
+            item.track != null && item.track!.kind == 'audio',
+      )
+      ?.dtmfSender;
 
   String? get contact => _contact;
 
@@ -262,8 +263,7 @@ class RTCSession extends EventManager implements Owner {
     dynamic originalTarget = target;
     EventManager eventHandlers = options['eventHandlers'] ?? EventManager();
     List<dynamic> extraHeaders = utils.cloneArray(options['extraHeaders']);
-    Map<String, dynamic> mediaConstraints =
-        options['mediaConstraints'] ??
+    Map<String, dynamic> mediaConstraints = options['mediaConstraints'] ??
         <String, dynamic>{'audio': true, 'video': true};
     MediaStream? mediaStream = options['mediaStream'];
     Map<String, dynamic> pcConfig =
@@ -410,8 +410,7 @@ class RTCSession extends EventManager implements Owner {
     // Get the Expires header value if exists.
     if (request.hasHeader('expires')) {
       try {
-        expires =
-            (request.getHeader('expires') is num
+        expires = (request.getHeader('expires') is num
                 ? request.getHeader('expires')
                 : num.tryParse(request.getHeader('expires'))!) *
             1000;
@@ -819,10 +818,9 @@ class RTCSession extends EventManager implements Owner {
 
     Object cause = options['cause'] ?? DartSIP_C.CausesType.BYE;
 
-    List<dynamic> extraHeaders =
-        options['extraHeaders'] != null
-            ? utils.cloneArray(options['extraHeaders'])
-            : <dynamic>[];
+    List<dynamic> extraHeaders = options['extraHeaders'] != null
+        ? utils.cloneArray(options['extraHeaders'])
+        : <dynamic>[];
     Object? body = options['body'];
 
     String? cancel_reason;
@@ -899,8 +897,7 @@ class RTCSession extends EventManager implements Owner {
       case RtcSessionState.confirmed:
         logger.d('terminating session');
 
-        reason_phrase =
-            options['reason_phrase'] as String? ??
+        reason_phrase = options['reason_phrase'] as String? ??
             DartSIP_C.REASON_PHRASE[status_code ?? 0];
 
         if (status_code != null && (status_code < 200 || status_code >= 700)) {
@@ -1296,8 +1293,7 @@ class RTCSession extends EventManager implements Owner {
 
     bool? upgradeToVideo;
     try {
-      upgradeToVideo =
-          (options['mediaConstraints']?['video'] != false ||
+      upgradeToVideo = (options['mediaConstraints']?['video'] != false ||
               options['mediaConstraints']?['mandatory']?['video'] != null) &&
           rtcOfferConstraints?['offerToReceiveVideo'] == null;
     } catch (e) {
@@ -1695,6 +1691,7 @@ class RTCSession extends EventManager implements Owner {
     clearTimeout(_timers.userNoAnswerTimer);
 
     _iceDisconnectTimer?.cancel();
+    _iceFailedRestartTimer?.cancel();
 
     // Clear Session Timers.
     clearTimeout(_sessionTimers.timer);
@@ -1772,8 +1769,7 @@ class RTCSession extends EventManager implements Owner {
   }
 
   void _iceRestart() async {
-    Map<String, dynamic> offerConstraints =
-        _rtcOfferConstraints ??
+    Map<String, dynamic> offerConstraints = _rtcOfferConstraints ??
         <String, dynamic>{
           'mandatory': <String, dynamic>{},
           'optional': <dynamic>[],
@@ -1794,17 +1790,49 @@ class RTCSession extends EventManager implements Owner {
           'ICE State change ignored, SIP session already terminated/canceled.',
         );
         _iceDisconnectTimer?.cancel();
+        _iceFailedRestartTimer?.cancel();
         return;
       }
 
       if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
-        logger.e('ICE Connection State Failed.');
         _iceDisconnectTimer?.cancel();
-        terminate(<String, dynamic>{
-          'cause': DartSIP_C.CausesType.RTP_TIMEOUT,
-          'status_code': 408,
-          'reason_phrase': 'ICE Connection Failed',
-        });
+        _iceDisconnectTimer = null;
+
+        if (!_hasAttemptedIceRestartOnFailed) {
+          logger.w(
+              'ICE Connection State Failed. Attempting one ICE restart before terminating...');
+          _hasAttemptedIceRestartOnFailed = true;
+          _isAttemptingIceRestart = true;
+          _iceRestart();
+
+          _iceFailedRestartTimer = Timer(const Duration(seconds: 10), () {
+            _iceFailedRestartTimer = null;
+            if (_state != RtcSessionState.terminated &&
+                _state != RtcSessionState.canceled &&
+                _connection?.iceConnectionState !=
+                    RTCIceConnectionState.RTCIceConnectionStateConnected &&
+                _connection?.iceConnectionState !=
+                    RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+              logger.e(
+                  'ICE restart after Failed did not recover within 10s. Terminating session.');
+              terminate(<String, dynamic>{
+                'cause': DartSIP_C.CausesType.RTP_TIMEOUT,
+                'status_code': 408,
+                'reason_phrase': 'ICE Connection Failed',
+              });
+            }
+          });
+        } else {
+          logger.e(
+              'ICE Connection State Failed again after restart attempt. Terminating session.');
+          _iceFailedRestartTimer?.cancel();
+          _iceFailedRestartTimer = null;
+          terminate(<String, dynamic>{
+            'cause': DartSIP_C.CausesType.RTP_TIMEOUT,
+            'status_code': 408,
+            'reason_phrase': 'ICE Connection Failed',
+          });
+        }
       } else if (state ==
           RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
         logger.w('ICE Connection State Disconnected.');
@@ -1836,30 +1864,35 @@ class RTCSession extends EventManager implements Owner {
       } else if (state ==
               RTCIceConnectionState.RTCIceConnectionStateConnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
-        final bool wasDisconnected =
-            _lastIceState ==
+        final bool wasDisconnected = _lastIceState ==
                 RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
-            _lastIceState ==
-                RTCIceConnectionState.RTCIceConnectionStateFailed;
+            _lastIceState == RTCIceConnectionState.RTCIceConnectionStateFailed;
 
-        if (_iceDisconnectTimer != null || _isAttemptingIceRestart) {
+        if (_iceDisconnectTimer != null ||
+            _iceFailedRestartTimer != null ||
+            _isAttemptingIceRestart) {
           logger.i(
-            'ICE Connection State Connected/Completed. Canceling timer/resetting flag.',
+            'ICE Connection State Connected/Completed. Canceling timers/resetting flags.',
           );
           _iceDisconnectTimer?.cancel();
           _iceDisconnectTimer = null;
+          _iceFailedRestartTimer?.cancel();
+          _iceFailedRestartTimer = null;
           _isAttemptingIceRestart = false;
+          _hasAttemptedIceRestartOnFailed = false;
         } else {
           logger.i('ICE Connection State Connected/Completed.');
         }
 
         if (wasDisconnected) {
-          logger.i('ICE fully recovered after disconnection → emitting EventCallIceRecovered.');
+          logger.i(
+              'ICE fully recovered after disconnection → emitting EventCallIceRecovered.');
           emit(EventCallIceRecovered(session: this));
         }
       } else if (state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
         logger.i('ICE Connection State Closed.');
         _iceDisconnectTimer?.cancel();
+        _iceFailedRestartTimer?.cancel();
         if (_state != RtcSessionState.terminated &&
             _state != RtcSessionState.canceled) {
           logger.w(
@@ -1926,17 +1959,15 @@ class RTCSession extends EventManager implements Owner {
     Completer<RTCSessionDescription> completer =
         Completer<RTCSessionDescription>();
 
-    constraints =
-        constraints ??
+    constraints = constraints ??
         <String, dynamic>{
           'mandatory': <String, dynamic>{},
           'optional': <dynamic>[],
         };
 
     List<Future<RTCSessionDescription> Function(RTCSessionDescription)>
-    modifiers =
-        constraints['offerModifiers'] ??
-        <Future<RTCSessionDescription> Function(RTCSessionDescription)>[];
+        modifiers = constraints['offerModifiers'] ??
+            <Future<RTCSessionDescription> Function(RTCSessionDescription)>[];
 
     constraints['offerModifiers'] = null;
 
@@ -2987,10 +3018,9 @@ class RTCSession extends EventManager implements Owner {
 
     options = options ?? <String, dynamic>{};
 
-    List<dynamic> extraHeaders =
-        options['extraHeaders'] != null
-            ? utils.cloneArray(options['extraHeaders'])
-            : <dynamic>[];
+    List<dynamic> extraHeaders = options['extraHeaders'] != null
+        ? utils.cloneArray(options['extraHeaders'])
+        : <dynamic>[];
     EventManager eventHandlers = options['eventHandlers'] ?? EventManager();
     Map<String, dynamic>? rtcOfferConstraints =
         options['rtcOfferConstraints'] ?? _rtcOfferConstraints;
@@ -3109,10 +3139,9 @@ class RTCSession extends EventManager implements Owner {
 
     options = options ?? <String, dynamic>{};
 
-    List<dynamic> extraHeaders =
-        options['extraHeaders'] != null
-            ? utils.cloneArray(options['extraHeaders'])
-            : <dynamic>[];
+    List<dynamic> extraHeaders = options['extraHeaders'] != null
+        ? utils.cloneArray(options['extraHeaders'])
+        : <dynamic>[];
     EventManager eventHandlers = options['eventHandlers'] ?? EventManager();
     Map<String, dynamic>? rtcOfferConstraints =
         options['rtcOfferConstraints'] ?? _rtcOfferConstraints;
@@ -3291,8 +3320,7 @@ class RTCSession extends EventManager implements Owner {
       options['extraHeaders'] ?? <dynamic>[],
     );
     EventManager eventHandlers = options['eventHandlers'] ?? EventManager();
-    Map<String, dynamic> rtcOfferConstraints =
-        options['rtcOfferConstraints'] ??
+    Map<String, dynamic> rtcOfferConstraints = options['rtcOfferConstraints'] ??
         _rtcOfferConstraints ??
         <String, dynamic>{};
     bool sdpOffer = options['sdpOffer'] ?? false;
